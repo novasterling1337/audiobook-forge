@@ -156,9 +156,11 @@ def cmd_extract(args) -> int:
     start = args.start_at if args.start_at is not None else book.extract.get("start_at")
     end = args.end_at if args.end_at is not None else book.extract.get("end_at")
     skip = list(book.extract.get("skip_lines", [])) + list(args.skip or [])
+    heading = (args.heading_pattern if args.heading_pattern is not None
+               else book.extract.get("heading_pattern"))
     print(f"extracting {src.name} -> {book.sections_file}")
     sections = ex.extract(src, book.sections_file, start_at=start, end_at=end,
-                          skip_lines=skip)
+                          skip_lines=skip, heading_pattern=heading)
     words = sum(len(p.split()) for s in sections for p in s["paras"])
     print(f"{len(sections)} sections, {words} words, "
           f"~{_human(words / float(book.render['wpm']) * 60)} of audio")
@@ -336,6 +338,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--start-at", dest="start_at")
     e.add_argument("--end-at", dest="end_at")
     e.add_argument("--skip", action="append", help="regex; matching lines dropped")
+    e.add_argument("--heading-pattern", dest="heading_pattern",
+                   help="extra heading regex for this book, added to the built-ins")
     e.set_defaults(func=cmd_extract)
 
     s = book_arg(sub.add_parser("sections", help="list sections and estimated durations"))

@@ -43,6 +43,10 @@ DEFAULTS: dict = {
         "end_at": None,        # regex; text from the first match onward is dropped
         "skip_lines": [],      # regexes; matching lines are deleted outright
         "exclude": [],         # section names never rendered (Notes, Index, ...)
+        # Extra heading form for this book only, e.g. "^\\d{1,2}\\.\\s+\\S" for
+        # chapters titled "2. Catastrophic Information". Never a global default:
+        # a numbered line is a list item in one book and a heading in another.
+        "heading_pattern": None,
     },
     "bundle": {
         "enabled": True,

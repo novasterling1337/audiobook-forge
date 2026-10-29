@@ -17,6 +17,7 @@ import json
 import re
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 # Section headings we recognise. Anything else stays body text, which is the
@@ -52,7 +53,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def to_text(src: Path) -> str:
+def to_text(src: Path, heading_pattern: str | None = None) -> str:
     """Return plain text for any supported book format."""
     suffix = src.suffix.lower()
     if suffix in (".txt", ".text"):
@@ -71,16 +72,104 @@ def to_text(src: Path) -> str:
             if shutil.which(cmd[0]):
                 r = _run(cmd)
                 if r.returncode == 0 and r.stdout.strip():
-                    return r.stdout
+                    return reflow_pdf(r.stdout, heading_pattern)
         try:  # optional, better at columns
             import pymupdf  # type: ignore
 
             with pymupdf.open(src) as doc:
-                return "\n\n".join(page.get_text() for page in doc)
+                pages = [page.get_text("blocks") for page in doc]
+            flat = [[b[4] for b in page] for page in pages]
+            return "\n\n".join(p.strip() for page in flat for p in page if p.strip())
         except Exception as exc:  # noqa: BLE001
             raise ExtractError(f"cannot read PDF {src.name}: {exc}") from exc
 
     raise ExtractError(f"unsupported format {suffix or src.name}")
+
+
+TERMINAL_PUNCT = re.compile(r"[.!?\u2026\"\u201d\u2019)\]]$")
+HYPHEN_BREAK = re.compile(r"[A-Za-z]-$")
+
+
+def is_heading_line(line: str, heading_pattern: str | None = None,
+                    *, at_page_top: bool = False) -> bool:
+    """True if this single line is a section heading rather than body text.
+
+    Chapter openers usually sit at the top of a page, but not always: in
+    Sataneon Chapter 1 starts mid-page. Mid-page detection is therefore
+    confined to the book's own `heading_pattern`, because the built-in rules
+    would also promote table-of-contents entries and numbered footnotes into
+    sections (Prometheus and Atlas gained four phantom sections that way).
+    """
+    if heading_pattern and _heading_regex(heading_pattern).match(line):
+        return len(line) <= 110 and not line.rstrip().endswith(".")
+    if not at_page_top:
+        return False
+    return split_heading(line) is not None
+
+
+def reflow_pdf(text: str, heading_pattern: str | None = None) -> str:
+    """Rebuild paragraphs from pdftotext output.
+
+    pdftotext hard-wraps at the physical line width and emits almost no blank
+    lines: a 117 page book came out as 4,040 lines with 128 blank-line
+    separators for roughly 600 paragraphs. `to_blocks` splits only on blank
+    lines, so without this pass a whole PDF collapses into a handful of blocks
+    and sectionising yields one 40k-word `Front Matter`.
+
+    Rebuild structure from line shape instead:
+
+    * a form feed starts a page; a page whose first line is a heading opens a
+      new section, because chapter openers land at page tops in print;
+    * a line ending in terminal punctuation followed by a line starting with a
+      capital opens a new paragraph;
+    * a line ending in a hyphen rejoins with the next line without a space;
+    * bare page numbers and running heads repeated across pages are dropped.
+
+    Output is blank-line separated so the EPUB path (pandoc) and the PDF path
+    feed `to_blocks` identically.
+    """
+    pages = text.replace("\r\n", "\n").replace("\r", "\n").split("\f")
+    counts = Counter(
+        line.strip() for page in pages for line in page.splitlines() if line.strip()
+    )
+    running_heads = {line for line, n in counts.items() if n >= 4}
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            paragraphs.append(" ".join(current).strip())
+            current.clear()
+
+    for page in pages:
+        lines = [line.strip() for line in page.splitlines()]
+        lines = [
+            line
+            for line in lines
+            if line
+            and line not in running_heads
+            and not PAGE_NUMBER_RE.fullmatch(line)
+        ]
+        for i, line in enumerate(lines):
+            if is_heading_line(line, heading_pattern, at_page_top=(i == 0)):
+                flush()
+                paragraphs.append(line)
+                continue
+            if not current:
+                current.append(line)
+                continue
+            prev = current[-1]
+            if HYPHEN_BREAK.search(prev) and line[:1].islower():
+                current[-1] = prev[:-1] + line
+                continue
+            starts_new = line[:1].isupper() or line[:1] in "\u201c\"'\u2018("
+            if TERMINAL_PUNCT.search(prev) and starts_new:
+                flush()
+            current.append(line)
+        # A paragraph continues across a page break; do not flush here.
+    flush()
+    return "\n\n".join(p for p in paragraphs if p)
 
 
 # --------------------------------------------------------------------------
@@ -108,10 +197,25 @@ def to_blocks(text: str, skip_res: list[re.Pattern] | None = None) -> list[str]:
     return blocks
 
 
-def split_heading(block: str) -> tuple[str, str] | None:
-    """Return (name, title) if this block is a section heading."""
+def split_heading(block: str, heading_pattern: str | None = None) -> tuple[str, str] | None:
+    """Return (name, title) if this block is a section heading.
+
+    `heading_pattern` is a per-book regex that ADDS a heading form the built-in
+    rules miss (`2. Catastrophic Information`); built-in headings still match.
+    It is configuration, not a global default: plain numbered lines are list
+    items in some books (Closer Encounters) and chapter headings in others
+    (Lovers of Sophia).
+    """
     if len(block) > 110:
         return None
+    if heading_pattern:
+        m = _heading_regex(heading_pattern).match(block)
+        if m:
+            groups = m.groupdict()
+            if groups.get("name"):
+                name = normalise_name(groups["name"].strip())
+                return name, (groups.get("title") or "").strip()
+            return _numbered_heading(block)
     m = HEADING_RE.match(block)
     if not m:
         return None
@@ -119,6 +223,24 @@ def split_heading(block: str) -> tuple[str, str] | None:
     title = (m.group("title") or "").strip()
     name = normalise_name(name)
     return name, title
+
+
+_HEADING_CACHE: dict[str, re.Pattern] = {}
+
+
+def _heading_regex(pattern: str) -> re.Pattern:
+    if pattern not in _HEADING_CACHE:
+        _HEADING_CACHE[pattern] = re.compile(pattern, re.IGNORECASE)
+    return _HEADING_CACHE[pattern]
+
+
+def _numbered_heading(block: str) -> tuple[str, str]:
+    """`2. Catastrophic Information` -> ('Chapter 2', 'Catastrophic Information')."""
+    text = block.strip().rstrip(".")
+    m = re.match(r"^(?P<num>\d{1,2})\s*[.):]\s*(?P<title>\S.*)$", text)
+    if m:
+        return f"Chapter {m.group('num')}", m.group("title").strip()
+    return normalise_name(text), ""
 
 
 def normalise_name(name: str) -> str:
@@ -152,7 +274,8 @@ def looks_like_subtitle(block: str) -> bool:
 # section assembly
 # --------------------------------------------------------------------------
 def sectionise(blocks: list[str], cfg: dict | None = None,
-               start_at: str | None = None, end_at: str | None = None) -> list[dict]:
+               start_at: str | None = None, end_at: str | None = None,
+               heading_pattern: str | None = None) -> list[dict]:
     """Group blocks into sections. `start_at`/`end_at` are regexes."""
     cfg = cfg or {}
     start_re = re.compile(start_at) if start_at else None
@@ -171,7 +294,7 @@ def sectionise(blocks: list[str], cfg: dict | None = None,
             else:
                 continue
 
-        head = split_heading(block)
+        head = split_heading(block, heading_pattern)
         if head:
             name, title = head
             if current["paras"] or current["title"]:
@@ -197,12 +320,13 @@ def sectionise(blocks: list[str], cfg: dict | None = None,
 
 def extract(src: Path, out: Path, *, start_at: str | None = None,
             end_at: str | None = None, skip_lines: list[str] | None = None,
-            quiet: bool = False) -> list[dict]:
+            heading_pattern: str | None = None, quiet: bool = False) -> list[dict]:
     if not src.exists():
         raise ExtractError(f"source not found: {src}")
     skip_res = [re.compile(p, re.IGNORECASE) for p in (skip_lines or [])]
-    blocks = to_blocks(to_text(src), skip_res)
-    sections = sectionise(blocks, start_at=start_at, end_at=end_at)
+    blocks = to_blocks(to_text(src, heading_pattern), skip_res)
+    sections = sectionise(blocks, start_at=start_at, end_at=end_at,
+                          heading_pattern=heading_pattern)
     if not sections:
         raise ExtractError("no sections detected; check start_at / heading rules")
     out.parent.mkdir(parents=True, exist_ok=True)

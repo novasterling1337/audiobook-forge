@@ -182,6 +182,7 @@ def cmd_render(args) -> int:
     sections = _pick(book, args.section)
     r = Renderer(book, voice=args.voice, window=args.window, chunk_chars=args.chunks,
                   keep_takes=args.keep_takes, dry_run=args.dry_run,
+                  progress=getattr(args, "progress", True),
                   out_dir=Path(os.path.expanduser(args.out)).expanduser() if args.out else None)
     ok = r.render_all(sections)
     return 0 if ok else 1
@@ -353,6 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out")
     r.add_argument("--keep-takes", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--no-progress", dest="progress", action="store_false", default=True,
+                   help="no bar, no progress lines, no work/progress.json")
     r.set_defaults(func=cmd_render)
 
     st = book_arg(sub.add_parser("status", help="what is rendered, what is pending"))

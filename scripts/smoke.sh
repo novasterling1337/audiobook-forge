@@ -26,7 +26,25 @@ voice=${FORGE_SMOKE_VOICE:-"Jason Jorjani (icl exact)"}
   --author "Smoke" --voice "$voice" --out-dir "$tmp/out" >/dev/null
 
 "$repo/bin/forge" extract smoke
-"$repo/bin/forge" render smoke
+
+render=$("$repo/bin/forge" render smoke)
+echo "$render"
+case "$render" in
+  *"PROG "*) : ;;
+  *) echo "FAIL: render printed no progress line over a pipe" >&2; exit 1 ;;
+esac
+
+snapshot="$FORGE_BOOKS/smoke/work/progress.json"
+[ -s "$snapshot" ] || { echo "FAIL: no progress.json written" >&2; exit 1; }
+python3 - "$snapshot" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d["phase"] == "done", d["phase"]
+assert d["clipsDone"] == d["clipsTotal"] > 0, d
+assert d["percent"] == 100.0, d["percent"]
+print(f"progress snapshot ok: {d['clipsDone']} clips, {d['audioSeconds']}s audio")
+PY
+
 "$repo/bin/forge" status smoke
 "$repo/bin/forge" verify smoke
 "$repo/bin/forge" bundle smoke

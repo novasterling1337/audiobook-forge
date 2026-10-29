@@ -104,6 +104,29 @@ A `.json` manifest next to each `.wav` records words, chunks, durations, drift,
 wall time, per-clip durations and hashes, so a later session can tell exactly
 what produced a file.
 
+## Watching a render
+
+Rendering is measured in hours, so `render` reports live progress and an ETA
+from the run itself, not from a constant. Wall time per clip differs by 5x
+between hosts on this project with identical config, so the estimate is the
+median wall time of the last 20 finished clips times the clips still to render.
+It shows "warming up" for the first three clips instead of inventing a number.
+
+Three surfaces, because a render gets watched three ways:
+
+* **A terminal**: one bar on the last line, redrawn per clip.
+  `05 Chapter 5 [...] 84/169 50% 9m12s 12m04s left, 13.4s/clip`
+* **A pipe** (Hermes jobs, cron, `tee`): throttled plain lines, at most one a
+  minute, which also land in `work/<slug>/render.log` under a `PROG` tag.
+* **Another process**: `work/<slug>/progress.json` is rewritten atomically per
+  clip with phase, clips done and total, ETA, seconds per clip and audio
+  seconds. Read it to follow a render you did not start.
+
+Phase is one of `render`, `joining`, `done`, `failed`, so a bar parked at 100%
+during the ffmpeg join is distinguishable from a hang. `--no-progress` silences
+all three. Clips already cached from an interrupted run are counted as done
+and excluded from the ETA.
+
 ## Commands
 
 | Command | Purpose |
@@ -113,7 +136,7 @@ what produced a file.
 | `forge new <slug> --source ... [--title --author --voice]` | scaffold `~/.config/audiobooks/books/<slug>/book.toml` |
 | `forge extract <slug> [--source --start-at --end-at --skip REGEX]` | rebuild `sections.json` |
 | `forge sections <slug>` | sections, word counts, estimated minutes |
-| `forge render <slug> [--section NAME\|N]... [--dry-run] [--window N] [--chunks N] [--voice V] [--out DIR] [--keep-takes]` | render |
+| `forge render <slug> [--section NAME\|N]... [--dry-run] [--window N] [--chunks N] [--voice V] [--out DIR] [--keep-takes] [--no-progress]` | render |
 | `forge status <slug>` | done / pending / excluded, per section |
 | `forge verify <slug> [--section ...] [--transcribe]` | duration, drift, levels, optional transcript |
 | `forge bundle <slug> [--out PATH --bitrate 64k --dry-run]` | chapterised `.m4b` |

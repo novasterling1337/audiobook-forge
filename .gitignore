@@ -1,3 +1,8 @@
+# Books are environment-specific: absolute source paths, output locations and
+# derived text. They are backed up on their own (see README, "Moving to another
+# machine"), never committed.
+books/
+
 work/
 *.wav
 *.m4b

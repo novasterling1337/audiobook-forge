@@ -146,6 +146,16 @@ def books_root() -> Path:
     return Path(__file__).resolve().parent.parent / "books"
 
 
+def backup_root() -> Path:
+    """Where `forge backup` and `forge voice-backup` write by default.
+
+    `books/` is untracked environment state, so its copies need a home that is
+    not a deliverable folder: ~/.config/audiobooks.
+    """
+    raw = os.environ.get("FORGE_BACKUP_ROOT")
+    return Path(os.path.expanduser(raw or "~/.config/audiobooks"))
+
+
 def load(target: str | None = None) -> Book:
     """Resolve a book from a slug, a directory, or a book.toml path."""
     root = books_root()

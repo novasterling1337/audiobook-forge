@@ -282,7 +282,7 @@ def cmd_backup(args) -> int:
     impossible to reproduce exactly.
     """
     book = config.load(args.book)
-    dest = Path(os.path.expanduser(args.dest or f"~/Audiobooks/_books/{book.slug}"))
+    dest = Path(os.path.expanduser(args.dest)) if args.dest else config.backup_root() / book.slug
     dest.mkdir(parents=True, exist_ok=True)
     copied = []
     for name in ("book.toml",):
@@ -316,7 +316,7 @@ def cmd_voice_backup(args) -> int:
     if not src.is_dir():
         print(f"no voices directory at {src}")
         return 1
-    dest = Path(os.path.expanduser(args.dest or "~/Audiobooks/_voices"))
+    dest = Path(os.path.expanduser(args.dest)) if args.dest else config.backup_root() / "_voices"
     dest.mkdir(parents=True, exist_ok=True)
     hits = list(src.glob(f"{args.name}*"))
     if not hits:
@@ -397,7 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("voices", help="list vocello voices").set_defaults(func=cmd_voices)
 
     bk = book_arg(sub.add_parser("backup", help="copy book.toml + sections.json somewhere durable"))
-    bk.add_argument("--dest", help="default ~/Audiobooks/_books/<slug>")
+    bk.add_argument("--dest", help="default ~/.config/audiobooks/<slug>")
     bk.set_defaults(func=cmd_backup)
 
     vb = sub.add_parser("voice-backup", help="copy a voice profile for another machine")

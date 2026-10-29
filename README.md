@@ -60,7 +60,7 @@ audiobook-forge/
 `books/` is ignored on purpose. A book definition holds absolute source paths
 and the output location for that machine, and `sections.json` is derived state,
 so the directory belongs to the host rather than the repo. `forge backup
-<slug>` copies `book.toml` and `sections.json` to `~/Audiobooks/_books/<slug>/`
+<slug>` copies `book.toml` and `sections.json` to `~/.config/audiobooks/<slug>/`
 so the one thing that is painful to rebuild survives a wiped checkout.
 
 Rendered audio stays where `out_dir` points (default `~/Audiobooks/<slug>`).
@@ -105,9 +105,9 @@ what produced a file.
 | `forge status <slug>` | done / pending / excluded, per section |
 | `forge verify <slug> [--section ...] [--transcribe]` | duration, drift, levels, optional transcript |
 | `forge bundle <slug> [--out PATH --bitrate 64k --dry-run]` | chapterised `.m4b` |
-| `forge backup <slug> [--dest DIR]` | copy `book.toml` + `sections.json` to `~/Audiobooks/_books/<slug>/` |
+| `forge backup <slug> [--dest DIR]` | copy `book.toml` + `sections.json` to `~/.config/audiobooks/<slug>/` |
 | `forge voices` | vocello voice list |
-| `forge voice-backup <name> [--dest DIR]` | copy a voice profile for another machine |
+| `forge voice-backup <name> [--dest DIR]` | copy a voice profile to `~/.config/audiobooks/_voices/` |
 
 Book selection accepts a slug, a directory, or a `book.toml` path, either as a
 positional (`forge render closer-encounters`) or with `-b`.
@@ -207,21 +207,21 @@ outside `book.toml`. On a new host:
    `ffmpeg`, optionally `whisper-cpp`), Python 3.11+.
 2. Restore the voice profile. The source of truth is
    `~/Library/Application Support/QwenVoice/voices/<name>.*` on macOS
-   (`.wav`, `.txt`, `.voice.json`, `.clone_prompt/`). Back it up with
-   `forge voice-backup "<name>" --dest ~/Audiobooks/_voices` and copy that
-   directory to
-   the new machine's application-support path, then `forge voices` to confirm.
-3. Copy `books/<slug>/` including `sections.json` — that file is the expensive
-   derivation and cannot be regenerated identically without the source EPUB.
-   Because `books/` is not in git, keep the copy from `forge backup <slug>`
-   (`~/Audiobooks/_books/<slug>/`) somewhere outside the repo and restore from
-   there.
+   (`.wav`, `.txt`, `.voice.json`, `.clone_prompt/`). `forge voice-backup
+   "<name>"` copies it to `~/.config/audiobooks/_voices/`; copy that directory
+   to the new machine's application-support path, then `forge voices` to
+   confirm.
+3. Restore the book from `forge backup <slug>`, which writes `book.toml` and
+   `sections.json` to `~/.config/audiobooks/<slug>/`. `sections.json` is the
+   expensive derivation and cannot be regenerated identically without the
+   source EPUB, and `books/` is not in git, so this copy is the only one.
 4. Point `out_dir` at the new audio location and run `forge render` — finished
    sections are skipped by duration check, so a partially rendered book
    continues instead of restarting.
 
-`FORGE_BOOKS` relocates the book root, `FORGE_VOCELLO`, `FORGE_FFMPEG`,
-`FORGE_FFPROBE` and `FORGE_PYTHON` override binaries, and
+`FORGE_BOOKS` relocates the book root, `FORGE_BACKUP_ROOT` relocates the
+backup home (default `~/.config/audiobooks`), `FORGE_VOCELLO`,
+`FORGE_FFMPEG`, `FORGE_FFPROBE` and `FORGE_PYTHON` override binaries, and
 `FORGE_WHISPER_MODEL` points at the ggml model for transcript checks.
 
 ## Known failure modes

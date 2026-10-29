@@ -50,12 +50,18 @@ audiobook-forge/
 │   ├── render.py              windows, resume, joining, manifests
 │   ├── verify.py              duration / level / transcript checks
 │   └── audio.py               ffmpeg and ffprobe helpers
-├── books/<slug>/
+├── books/<slug>/              NOT in git — environment state, back it up
 │   ├── book.toml              everything book-specific
-│   ├── sections.json          derived text, committed so it can never be lost
+│   ├── sections.json          derived text; expensive to reproduce
 │   └── work/                  takes + state.json while a section renders
 └── scripts/smoke.sh           end-to-end check without a real book
 ```
+
+`books/` is ignored on purpose. A book definition holds absolute source paths
+and the output location for that machine, and `sections.json` is derived state,
+so the directory belongs to the host rather than the repo. `forge backup
+<slug>` copies `book.toml` and `sections.json` to `~/Audiobooks/_books/<slug>/`
+so the one thing that is painful to rebuild survives a wiped checkout.
 
 Rendered audio stays where `out_dir` points (default `~/Audiobooks/<slug>`).
 For an existing book whose audio is elsewhere, set `out_dir` and the renderer
@@ -99,6 +105,7 @@ what produced a file.
 | `forge status <slug>` | done / pending / excluded, per section |
 | `forge verify <slug> [--section ...] [--transcribe]` | duration, drift, levels, optional transcript |
 | `forge bundle <slug> [--out PATH --bitrate 64k --dry-run]` | chapterised `.m4b` |
+| `forge backup <slug> [--dest DIR]` | copy `book.toml` + `sections.json` to `~/Audiobooks/_books/<slug>/` |
 | `forge voices` | vocello voice list |
 | `forge voice-backup <name> [--dest DIR]` | copy a voice profile for another machine |
 
@@ -178,9 +185,11 @@ before the first real heading.
 ## Verification
 
 `forge verify` checks duration against the word count, then peak and mean
-level. `--transcribe` spot-checks the first and last 25 seconds with
-`whisper-cli`, which is how a truncated opening or a chapter that ends
-mid-sentence gets caught.
+level. The pass condition is percentage drift or 8 seconds of absolute slack,
+because a 20 second section can drift 25 percent on clip padding alone while an
+hour-long chapter should be judged by percentage. `--transcribe` spot-checks the
+first and last 25 seconds with `whisper-cli`, which is how a truncated opening
+or a chapter that ends mid-sentence gets caught.
 
 Whisper is deliberately not the primary check: on an hour of audio it can skip
 a paragraph and still produce plausible text, so duration is the quantitative
@@ -204,6 +213,9 @@ outside `book.toml`. On a new host:
    the new machine's application-support path, then `forge voices` to confirm.
 3. Copy `books/<slug>/` including `sections.json` — that file is the expensive
    derivation and cannot be regenerated identically without the source EPUB.
+   Because `books/` is not in git, keep the copy from `forge backup <slug>`
+   (`~/Audiobooks/_books/<slug>/`) somewhere outside the repo and restore from
+   there.
 4. Point `out_dir` at the new audio location and run `forge render` — finished
    sections are skipped by duration check, so a partially rendered book
    continues instead of restarting.

@@ -11,7 +11,15 @@ from . import audio
 from .render import slug_for
 
 
-def check(path: Path, expected_seconds: float, tolerance: float = 0.25) -> dict:
+def check(path: Path, expected_seconds: float, tolerance: float = 0.25,
+          slack_seconds: float = 8.0) -> dict:
+    """Duration and level report for one rendered section.
+
+    The pass condition is percentage drift *or* an absolute slack. A 20 second
+    section can drift 25 percent from clip padding alone and still be perfect
+    audio, so a pure percentage gate produces false alarms on short sections
+    while an hour-long chapter is judged on percentage alone.
+    """
     d = audio.duration(path)
     drift = (d - expected_seconds) / expected_seconds if expected_seconds else 0.0
     res = {
@@ -19,7 +27,8 @@ def check(path: Path, expected_seconds: float, tolerance: float = 0.25) -> dict:
         "durationSeconds": round(d, 2),
         "expectedSeconds": round(expected_seconds, 1),
         "driftPercent": round(drift * 100, 1),
-        "ok": bool(d > 0 and abs(drift) <= tolerance),
+        "ok": bool(d > 0 and (abs(drift) <= tolerance
+                              or abs(d - expected_seconds) <= slack_seconds)),
     }
     res.update(audio.levels(path))
     return res

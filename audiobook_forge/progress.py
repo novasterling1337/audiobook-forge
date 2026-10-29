@@ -33,7 +33,8 @@ SAMPLES = 20
 """Clips remembered for the ETA median. Long enough to ride out one slow take."""
 
 
-def _hms(seconds: float) -> str:
+def human(seconds: float) -> str:
+    """Compact duration: `9m12s`, `1h04m`, `13s`."""
     seconds = int(max(0, seconds))
     hours, rest = divmod(seconds, 3600)
     minutes, secs = divmod(rest, 60)
@@ -42,6 +43,16 @@ def _hms(seconds: float) -> str:
     if minutes:
         return f"{minutes}m{secs:02d}s"
     return f"{secs}s"
+
+
+_hms = human
+
+
+def bar(fraction: float, width: int) -> str:
+    """ASCII fill bar. No unicode, so it survives ssh, tmux and log files."""
+    width = max(1, width)
+    filled = int(round(width * min(1.0, max(0.0, fraction))))
+    return "#" * filled + "-" * (width - filled)
 
 
 class Progress:
@@ -206,10 +217,9 @@ class Progress:
 
     def _draw(self) -> None:
         width = self._bar_width()
-        filled = int(round(width * self.done / self.total)) if self.total else width
-        bar = "#" * filled + "-" * (width - filled)
         pct = 100.0 * self.done / self.total if self.total else 100.0
-        line = (f"{self._prefix()} [{bar}] {self.done}/{self.total} {pct:3.0f}% "
+        line = (f"{self._prefix()} [{bar(self.done / self.total if self.total else 1, width)}] "
+                f"{self.done}/{self.total} {pct:3.0f}% "
                 f"{_hms(time.monotonic() - self.started)} {self._eta_piece()}")
         try:
             cols = shutil.get_terminal_size(fallback=(80, 24)).columns

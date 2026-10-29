@@ -127,6 +127,26 @@ during the ffmpeg join is distinguishable from a hang. `--no-progress` silences
 all three. Clips already cached from an interrupted run are counted as done
 and excluded from the ETA.
 
+### Watching a render you did not start
+
+`forge watch <slug>` reads all of the above from outside, without attaching to
+the render or writing anything, so it is safe next to a live run and safe to
+kill.
+
+```
+forge watch closer-encounters              # one line per section
+forge watch closer-encounters -f           # redraw until it finishes
+forge watch closer-encounters --json       # for a bot or a dashboard
+forge watch closer-encounters -f --interval 5
+```
+
+It prefers `work/<slug>/progress.json` while that snapshot is fresh, so
+position and phase come from the renderer. When the snapshot is missing or over
+150 s stale (a `--no-progress` run, an older forge, a render from another
+machine) it falls back to the filesystem: adopted takes plus the clips sitting
+in an in-flight window, and per-clip wall time from the wav mtimes. That
+fallback is why it still shows an ETA for a render that predates the snapshot.
+
 ## Commands
 
 | Command | Purpose |
@@ -138,6 +158,7 @@ and excluded from the ETA.
 | `forge sections <slug>` | sections, word counts, estimated minutes |
 | `forge render <slug> [--section NAME\|N]... [--dry-run] [--window N] [--chunks N] [--voice V] [--out DIR] [--keep-takes] [--no-progress]` | render |
 | `forge status <slug>` | done / pending / excluded, per section |
+| `forge watch <slug> [-f] [--section ...] [--interval S] [--json]` | follow a render from outside, read-only |
 | `forge verify <slug> [--section ...] [--transcribe]` | duration, drift, levels, optional transcript |
 | `forge bundle <slug> [--out PATH --bitrate 64k --dry-run]` | chapterised `.m4b` |
 | `forge voices` | vocello voice list |

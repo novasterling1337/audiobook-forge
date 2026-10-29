@@ -47,6 +47,23 @@ PY
 
 "$repo/bin/forge" status smoke
 "$repo/bin/forge" verify smoke
+
+# watch must work with no live render at all: everything is finished here.
+watch=$("$repo/bin/forge" watch smoke)
+echo "$watch"
+case "$watch" in
+  *"1/1 rendered"*) : ;;
+  *) echo "FAIL: watch did not report the finished section" >&2; exit 1 ;;
+esac
+"$repo/bin/forge" watch smoke --json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+s = d["sections"][0]
+assert s["rendered"] and s["phase"] == "done", s
+assert s["clipsDone"] == s["clipsTotal"] > 0, s
+print("watch snapshot ok:", s["clipsDone"], "clips")
+'
+
 "$repo/bin/forge" bundle smoke
 
 second=$("$repo/bin/forge" render smoke)

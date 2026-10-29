@@ -1,0 +1,14 @@
+#!/bin/sh
+# Launcher that needs no install: stdlib only, runs straight from the repo.
+# Symlink this into ~/.local/bin/forge (or add bin/ to PATH) on any machine.
+set -eu
+src=$0
+while [ -L "$src" ]; do
+  dir=$(CDPATH= cd -- "$(dirname -- "$src")" && pwd)
+  src=$(readlink "$src")
+  case $src in /*) ;; *) src="$dir/$src" ;; esac
+done
+here=$(CDPATH= cd -- "$(dirname -- "$src")/.." && pwd)
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec "${FORGE_PYTHON:-python3}" -m audiobook_forge "$@"

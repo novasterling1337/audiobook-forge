@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audiobook-forge"
+version = "0.1.0"
+description = "Reproducible, chapter-wise audiobook rendering with vocello"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+forge = "audiobook_forge.cli:main"
+
+[tool.setuptools]
+packages = ["audiobook_forge"]

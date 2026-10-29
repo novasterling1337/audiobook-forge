@@ -384,6 +384,11 @@ def main(argv: list[str] | None = None) -> int:
     except ex.ExtractError as exc:
         print(f"extract error: {exc}", file=sys.stderr)
         return 2
+    except FileNotFoundError as exc:
+        missing = exc.filename or "a required tool"
+        print(f"error: {missing} not found on PATH", file=sys.stderr)
+        print("run `forge doctor` to see what is missing", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130

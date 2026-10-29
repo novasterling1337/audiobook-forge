@@ -237,6 +237,23 @@ outside `book.toml`. On a new host:
 binaries, and
 `FORGE_WHISPER_MODEL` points at the ggml model for transcript checks.
 
+### Current second machine: macmini
+
+`forge` also runs on `nova@macmini`, at the same relative path but with its own
+library layout:
+
+| | this laptop | macmini |
+|---|---|---|
+| code | `~/Source/Audio/audiobook-forge` | `~/Source/Audio/audiobook-forge` |
+| source books | ProtonDrive `…/E-books/Jason Jorjani/` | `~/Books/Jason Jorjani/` |
+| rendered audio | `~/Downloads/Closer Encounters (audio)` | `~/Audiobooks/Jason Jorjani/Closer Encounters` |
+| book + voice config | `~/.config/audiobooks/` | `~/.config/audiobooks/` |
+
+Because `book.toml` carries those paths, each host has its own copy and they are
+not interchangeable. `bin/forge` picks the first Python 3.11+ it finds
+(`~/.local/bin`, Homebrew, `/usr/local`, then `PATH`) and honours
+`FORGE_PYTHON`, because a stock macOS `python3` is 3.9 and `tomllib` needs 3.11.
+
 ## Known failure modes
 
 | Symptom | Cause | Handling |

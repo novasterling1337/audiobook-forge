@@ -11,4 +11,27 @@ done
 here=$(CDPATH= cd -- "$(dirname -- "$src")/.." && pwd)
 PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONPATH
-exec "${FORGE_PYTHON:-python3}" -m audiobook_forge "$@"
+
+# tomllib and PEP 604 annotations mean Python 3.11 is the floor. A stock macOS
+# `python3` is often older, so pick the first 3.11+ that exists.
+if [ -n "${FORGE_PYTHON:-}" ]; then
+  py=$FORGE_PYTHON
+else
+  py=
+  for cand in python3.13 python3.12 python3.11 python3 \
+    "$HOME"/.local/bin/python3.13 "$HOME"/.local/bin/python3.12 "$HOME"/.local/bin/python3.11 \
+    /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 \
+    /usr/local/bin/python3.13 /usr/local/bin/python3.12 /usr/local/bin/python3.11; do
+    case $cand in
+      /*) [ -x "$cand" ] || continue ;;
+      *) command -v "$cand" >/dev/null 2>&1 || continue ;;
+    esac
+    if "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+      py=$cand
+      break
+    fi
+  done
+  [ -n "$py" ] || { echo "forge needs Python 3.11+ (set FORGE_PYTHON)" >&2; exit 1; }
+fi
+
+exec "$py" -m audiobook_forge "$@"

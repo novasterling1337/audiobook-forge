@@ -139,21 +139,26 @@ class Book:
         return f"{self.title}" + (f" — {self.author}" if self.author else "")
 
 
+def config_root() -> Path:
+    """Where all per-machine state lives: book definitions and voice exports.
+
+    Nothing book-specific belongs in the checkout. A book holds absolute source
+    paths and a machine-specific output location, so it is configuration, not
+    source: ~/.config/audiobooks by default.
+    """
+    raw = os.environ.get("FORGE_CONFIG_ROOT")
+    return Path(os.path.expanduser(raw or "~/.config/audiobooks"))
+
+
 def books_root() -> Path:
     raw = os.environ.get("FORGE_BOOKS")
     if raw:
         return Path(os.path.expanduser(raw))
-    return Path(__file__).resolve().parent.parent / "books"
+    return config_root() / "books"
 
 
-def backup_root() -> Path:
-    """Where `forge backup` and `forge voice-backup` write by default.
-
-    `books/` is untracked environment state, so its copies need a home that is
-    not a deliverable folder: ~/.config/audiobooks.
-    """
-    raw = os.environ.get("FORGE_BACKUP_ROOT")
-    return Path(os.path.expanduser(raw or "~/.config/audiobooks"))
+def voices_dir() -> Path:
+    return config_root() / "voices"
 
 
 def load(target: str | None = None) -> Book:

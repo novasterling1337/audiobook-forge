@@ -6,7 +6,7 @@ resumable, verifiable and portable between machines.
 One book is one directory. The pipeline is four commands:
 
 ```
-forge new <slug> --source book.epub     # scaffold books/<slug>/book.toml
+forge new <slug> --source book.epub     # scaffold ~/.config/audiobooks/books/<slug>/book.toml
 forge extract <slug>                    # EPUB/PDF/DOCX/TXT -> sections.json
 forge render <slug>                     # sections.json -> out_dir/NN Name.wav
 forge bundle <slug>                     # optionally: one chapterised .m4b
@@ -14,6 +14,25 @@ forge bundle <slug>                     # optionally: one chapterised .m4b
 
 Nothing here is specific to a single book: source format, section detection,
 voice, pacing and where the audio lands all come from `book.toml`.
+
+## Where things live
+
+The checkout is code only. Everything per-machine is under
+`~/.config/audiobooks`, so a book definition never sits next to source, needs no
+`.gitignore` entry and needs no separate backup step:
+
+```
+~/.config/audiobooks/
+├── books/<slug>/
+│   ├── book.toml              everything book-specific
+│   ├── sections.json          derived text; expensive to reproduce
+│   └── work/                  takes + state.json while a section renders
+└── voices/<name>.*            exported vocello profiles (forge voice-backup)
+```
+
+`forge books` lists what is there. `FORGE_CONFIG_ROOT` moves the whole tree,
+`FORGE_BOOKS` moves just the books directory. Rendered audio is separate again:
+wherever `out_dir` points, default `~/Audiobooks/<slug>`.
 
 ## Requirements
 
@@ -50,18 +69,11 @@ audiobook-forge/
 │   ├── render.py              windows, resume, joining, manifests
 │   ├── verify.py              duration / level / transcript checks
 │   └── audio.py               ffmpeg and ffprobe helpers
-├── books/<slug>/              NOT in git — environment state, back it up
-│   ├── book.toml              everything book-specific
-│   ├── sections.json          derived text; expensive to reproduce
-│   └── work/                  takes + state.json while a section renders
 └── scripts/smoke.sh           end-to-end check without a real book
 ```
 
-`books/` is ignored on purpose. A book definition holds absolute source paths
-and the output location for that machine, and `sections.json` is derived state,
-so the directory belongs to the host rather than the repo. `forge backup
-<slug>` copies `book.toml` and `sections.json` to `~/.config/audiobooks/<slug>/`
-so the one thing that is painful to rebuild survives a wiped checkout.
+No `books/` directory in the checkout: book definitions are configuration, and
+they live in `~/.config/audiobooks` (see above).
 
 Rendered audio stays where `out_dir` points (default `~/Audiobooks/<slug>`).
 For an existing book whose audio is elsewhere, set `out_dir` and the renderer
@@ -98,16 +110,15 @@ what produced a file.
 |---|---|
 | `forge doctor [book]` | tools, voices, paths, section count, disk |
 | `forge books` | list books and progress |
-| `forge new <slug> --source ... [--title --author --voice]` | scaffold `books/<slug>/book.toml` |
+| `forge new <slug> --source ... [--title --author --voice]` | scaffold `~/.config/audiobooks/books/<slug>/book.toml` |
 | `forge extract <slug> [--source --start-at --end-at --skip REGEX]` | rebuild `sections.json` |
 | `forge sections <slug>` | sections, word counts, estimated minutes |
 | `forge render <slug> [--section NAME\|N]... [--dry-run] [--window N] [--chunks N] [--voice V] [--out DIR] [--keep-takes]` | render |
 | `forge status <slug>` | done / pending / excluded, per section |
 | `forge verify <slug> [--section ...] [--transcribe]` | duration, drift, levels, optional transcript |
 | `forge bundle <slug> [--out PATH --bitrate 64k --dry-run]` | chapterised `.m4b` |
-| `forge backup <slug> [--dest DIR]` | copy `book.toml` + `sections.json` to `~/.config/audiobooks/<slug>/` |
 | `forge voices` | vocello voice list |
-| `forge voice-backup <name> [--dest DIR]` | copy a voice profile to `~/.config/audiobooks/_voices/` |
+| `forge voice-backup <name> [--dest DIR]` | copy a voice profile to `~/.config/audiobooks/voices/` |
 
 Book selection accepts a slug, a directory, or a `book.toml` path, either as a
 positional (`forge render closer-encounters`) or with `-b`.
@@ -205,23 +216,25 @@ outside `book.toml`. On a new host:
 
 1. `forge doctor` — install whatever it reports missing (`vocello`, `pandoc`,
    `ffmpeg`, optionally `whisper-cpp`), Python 3.11+.
-2. Restore the voice profile. The source of truth is
-   `~/Library/Application Support/QwenVoice/voices/<name>.*` on macOS
-   (`.wav`, `.txt`, `.voice.json`, `.clone_prompt/`). `forge voice-backup
-   "<name>"` copies it to `~/.config/audiobooks/_voices/`; copy that directory
-   to the new machine's application-support path, then `forge voices` to
-   confirm.
-3. Restore the book from `forge backup <slug>`, which writes `book.toml` and
-   `sections.json` to `~/.config/audiobooks/<slug>/`. `sections.json` is the
-   expensive derivation and cannot be regenerated identically without the
-   source EPUB, and `books/` is not in git, so this copy is the only one.
+2. Copy `~/.config/audiobooks` across. That single directory holds every book
+   definition, every `sections.json` and every exported voice profile, so the
+   migration is one `rsync`:
+
+   ```
+   rsync -a ~/.config/audiobooks/ newhost:~/.config/audiobooks/
+   ```
+3. Re-import the voice on the new machine: copy `voices/<name>.*` into
+   `~/Library/Application Support/QwenVoice/voices/` (`.wav`, `.txt`,
+   `.voice.json`, `.clone_prompt/`), then `forge voices` to confirm the profile
+   is listed.
 4. Point `out_dir` at the new audio location and run `forge render` — finished
    sections are skipped by duration check, so a partially rendered book
    continues instead of restarting.
 
-`FORGE_BOOKS` relocates the book root, `FORGE_BACKUP_ROOT` relocates the
-backup home (default `~/.config/audiobooks`), `FORGE_VOCELLO`,
-`FORGE_FFMPEG`, `FORGE_FFPROBE` and `FORGE_PYTHON` override binaries, and
+`FORGE_CONFIG_ROOT` relocates the whole config tree (default
+`~/.config/audiobooks`), `FORGE_BOOKS` just the books directory,
+`FORGE_VOCELLO`, `FORGE_FFMPEG`, `FORGE_FFPROBE` and `FORGE_PYTHON` override
+binaries, and
 `FORGE_WHISPER_MODEL` points at the ggml model for transcript checks.
 
 ## Known failure modes

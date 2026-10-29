@@ -1,8 +1,7 @@
-# Books are environment-specific: absolute source paths, output locations and
-# derived text. They are backed up on their own (see README, "Moving to another
-# machine"), never committed.
+# Book definitions, sections.json and voice exports are configuration and live
+# in ~/.config/audiobooks, so nothing book-specific should ever land here. These
+# patterns are a guard in case someone points FORGE_BOOKS at the checkout.
 books/
-
 work/
 *.wav
 *.m4b

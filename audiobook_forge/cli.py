@@ -273,35 +273,6 @@ def cmd_bundle(args) -> int:
     return 0
 
 
-def cmd_backup(args) -> int:
-    """Copy a book's definition and derived text somewhere durable.
-
-    `books/` is deliberately not tracked by git: it holds absolute source
-    paths and machine-specific output locations. That makes an explicit
-    backup the only protection for `sections.json`, which is expensive or
-    impossible to reproduce exactly.
-    """
-    book = config.load(args.book)
-    dest = Path(os.path.expanduser(args.dest)) if args.dest else config.backup_root() / book.slug
-    dest.mkdir(parents=True, exist_ok=True)
-    copied = []
-    for name in ("book.toml",):
-        src = book.path / name
-        if src.exists():
-            shutil.copy2(src, dest / name)
-            copied.append(name)
-    if book.sections_file.exists():
-        shutil.copy2(book.sections_file, dest / book.sections_file.name)
-        copied.append(book.sections_file.name)
-    if not copied:
-        print(f"nothing to back up in {book.path}")
-        return 1
-    for name in copied:
-        print(f"  {name}")
-    print(f"backed up {len(copied)} files to {dest}")
-    return 0
-
-
 def cmd_voices(args) -> int:
     if not shutil.which(VOCELLO):
         print("vocello not installed")
@@ -316,7 +287,7 @@ def cmd_voice_backup(args) -> int:
     if not src.is_dir():
         print(f"no voices directory at {src}")
         return 1
-    dest = Path(os.path.expanduser(args.dest)) if args.dest else config.backup_root() / "_voices"
+    dest = Path(os.path.expanduser(args.dest)) if args.dest else config.voices_dir()
     dest.mkdir(parents=True, exist_ok=True)
     hits = list(src.glob(f"{args.name}*"))
     if not hits:
@@ -395,10 +366,6 @@ def build_parser() -> argparse.ArgumentParser:
     b.set_defaults(func=cmd_bundle)
 
     sub.add_parser("voices", help="list vocello voices").set_defaults(func=cmd_voices)
-
-    bk = book_arg(sub.add_parser("backup", help="copy book.toml + sections.json somewhere durable"))
-    bk.add_argument("--dest", help="default ~/.config/audiobooks/<slug>")
-    bk.set_defaults(func=cmd_backup)
 
     vb = sub.add_parser("voice-backup", help="copy a voice profile for another machine")
     vb.add_argument("name")

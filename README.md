@@ -237,17 +237,17 @@ outside `book.toml`. On a new host:
 binaries, and
 `FORGE_WHISPER_MODEL` points at the ggml model for transcript checks.
 
-### Current second machine: macmini
+### Multiple machines
 
-`forge` also runs on `nova@macmini`, at the same relative path but with its own
-library layout:
+`book.toml` carries absolute paths, so each host keeps its own book definitions
+and they are not interchangeable. A typical layout keeps sources and finished
+audio outside the checkout:
 
-| | this laptop | macmini |
-|---|---|---|
-| code | `~/Source/Audio/audiobook-forge` | `~/Source/Audio/audiobook-forge` |
-| source books | ProtonDrive `…/E-books/Jason Jorjani/` | `~/Books/Jason Jorjani/` |
-| rendered audio | `~/Downloads/Closer Encounters (audio)` | `~/Audiobooks/Jason Jorjani/Closer Encounters` |
-| book + voice config | `~/.config/audiobooks/` | `~/.config/audiobooks/` |
+| | path |
+|---|---|
+| source books | `~/Books/<author>/` |
+| rendered audio | `~/Audiobooks/<author>/<book>/` |
+| book + voice config | `~/.config/audiobooks/` |
 
 Because `book.toml` carries those paths, each host has its own copy and they are
 not interchangeable. `bin/forge` picks the first Python 3.11+ it finds

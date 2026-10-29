@@ -26,13 +26,39 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
+from collections import deque
 from pathlib import Path
+from typing import Callable, TextIO
 
 from . import audio, chunk
 from .config import Book, ConfigError
+from .progress import Progress
 
 VOCELLO = os.environ.get("FORGE_VOCELLO", "vocello")
+
+_NDJSON: bool | None = None
+
+
+def supports_ndjson() -> bool:
+    """Does this vocello stream per-clip events?
+
+    `--ndjson` is how progress gets clip granularity. It exists in 3.x, and
+    older builds only know `--json`, so the render still works and the bar
+    degrades to one step per window instead of failing mid-chapter.
+    """
+    global _NDJSON
+    if _NDJSON is None:
+        try:
+            r = subprocess.run([VOCELLO, "capabilities"], capture_output=True,
+                               text=True, timeout=30)
+            data = json.loads(r.stdout or "{}")
+            _NDJSON = "ndjson" in (data.get("outputFormats") or [])
+        except (OSError, ValueError, subprocess.SubprocessError):
+            _NDJSON = False
+    return _NDJSON
 
 
 def _hash(text: str) -> str:
@@ -49,7 +75,8 @@ class Renderer:
     def __init__(self, book: Book, *, voice: str | None = None,
                  window: int | None = None, chunk_chars: int | None = None,
                  keep_takes: bool | None = None, dry_run: bool = False,
-                 out_dir: Path | None = None):
+                 out_dir: Path | None = None, progress: bool = True,
+                 stream: TextIO | None = None):
         self.book = book
         self.voice = voice or book.voice.get("name") or ""
         self.mode = book.voice.get("mode", "clone")
@@ -63,14 +90,21 @@ class Renderer:
         self.out_dir = out_dir or book.out_dir
         self.work = book.work_dir
         self.log_path = book.log_file
+        self.progress = progress
+        self.stream = stream or sys.stdout
+        self._prog: Progress | None = None
 
     # ------------------------------------------------------------------ log
     def log(self, msg: str) -> None:
         line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+        if self._prog is not None:
+            self._prog.suspend()
         print(line, flush=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+        if self._prog is not None:
+            self._prog.resume()
 
     # ---------------------------------------------------------------- paths
     def final_path(self, section: dict) -> Path:
@@ -126,29 +160,76 @@ class Renderer:
             self._save_state(cdir, fingerprint, takes)
         return takes
 
-    def _run_window(self, texts: list[str], wdir: Path) -> dict[int, Path]:
+    def _spawn(self, cmd: list[str],
+               on_clip: Callable[[float | None], None] | None) -> tuple[int, list[str]]:
+        """Run one vocello window, streaming events, keeping stderr for errors.
+
+        stderr is drained on its own thread: the engine logs a few lines on
+        model load, and a full stderr pipe would deadlock a long window.
+        """
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, bufsize=1)
+        tail: deque[str] = deque(maxlen=4)
+
+        def drain() -> None:
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                line = line.rstrip()
+                if line:
+                    tail.append(line)
+
+        thread = threading.Thread(target=drain, daemon=True)
+        thread.start()
+
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            kind = event.get("type")
+            if kind == "result":
+                # vocello reports usage and engine failures in the result event
+                # on stdout, so without this the "window returned 66" line has
+                # no reason attached to it.
+                message = ((event.get("data") or {}).get("error") or {}).get("message")
+                if message:
+                    tail.append(message)
+                continue
+            if on_clip is not None and kind == "generation_completed":
+                on_clip((event.get("data") or {}).get("durationSeconds"))
+
+        proc.wait()
+        thread.join(timeout=10)
+        return proc.returncode, list(tail)
+
+    def _run_window(self, texts: list[str], wdir: Path,
+                    on_clip: Callable[[float | None], None] | None = None) -> dict[int, Path]:
         wdir.mkdir(parents=True, exist_ok=True)
         rows = wdir / "rows.txt"
         rows.write_text("\n".join(t.replace("\n", " ") for t in texts) + "\n", encoding="utf-8")
 
+        streaming = on_clip is not None and supports_ndjson()
         cmd = [VOCELLO, "batch", "--file", str(rows), "--mode", self.mode,
                "--voice", self.voice, "--confirm-consent",
-               "--out-dir", str(wdir), "--json"]
+               "--out-dir", str(wdir), "--ndjson" if streaming else "--json"]
         cmd += list(self.book.voice.get("args", []))
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        code, err_tail = self._spawn(cmd, on_clip if streaming else None)
 
         got: dict[int, Path] = {}
         for f in sorted(wdir.glob("*_clone_*.wav")):
             m = re.search(r"_clone_(\d+)\.wav$", f.name)
             if m and audio.has_audio(f):
                 got[int(m.group(1))] = f
-        if r.returncode != 0:
-            tail = " | ".join((r.stderr or "").strip().splitlines()[-2:])[:220]
-            self.log(f"  window returned {r.returncode} ({len(got)}/{len(texts)} clips): {tail}")
+        if code != 0:
+            tail = " | ".join(err_tail[-2:])[:220]
+            self.log(f"  window returned {code} ({len(got)}/{len(texts)} clips): {tail}")
         return {i: p for i, p in got.items() if i < len(texts)}
 
     # -------------------------------------------------------------- render
-    def render_section(self, section: dict) -> bool:
+    def render_section(self, section: dict, position: tuple[int, int] | None = None) -> bool:
         final = self.final_path(section)
         p = chunk.plan(section, self.chunk_chars, self.wpm)
         chunks, words, expected = p["chunks"], p["words"], p["expected_seconds"]
@@ -181,6 +262,21 @@ class Renderer:
                  f"{len(chunks)} chunks ({len(takes)} cached), expect ~{expected/60:.1f} min audio")
         t0 = time.time()
 
+        prog = Progress(
+            label=slug_for(section), total=len(chunks), done_at_start=len(takes),
+            section_no=section.get("no"),
+            section=position[0] if position else None,
+            sections=position[1] if position else None,
+            enabled=self.progress, stream=self.stream,
+            state_path=self.work / "progress.json", line_sink=self.log)
+        self._prog = prog
+        if len(takes):
+            prog.note(f"{len(takes)} clips already cached, {len(missing)} to render")
+        prog.begin()
+
+        def on_clip(duration: float | None) -> None:
+            prog.clip(duration)
+
         for win_start in range(0, len(missing), self.window):
             window = missing[win_start:win_start + self.window]
             todo = list(window)
@@ -188,7 +284,7 @@ class Renderer:
             while todo and attempt < self.attempts:
                 attempt += 1
                 wdir = cdir / f"w{win_start:05d}_{attempt}"
-                got = self._run_window([texts[i] for i in todo], wdir)
+                got = self._run_window([texts[i] for i in todo], wdir, on_clip=on_clip)
                 for local_i, path in got.items():
                     gidx = todo[local_i]
                     dest = cdir / f"take_{gidx:05d}.wav"
@@ -199,13 +295,16 @@ class Renderer:
                 todo = [i for i in todo if i not in takes]
                 self._save_state(cdir, fingerprint, takes)
                 if todo:
-                    self.log(f"  window {win_start//self.window} attempt {attempt}: "
-                             f"{len(todo)} rows still missing")
+                    prog.note(f"window {win_start//self.window} attempt {attempt}: "
+                              f"{len(todo)} rows still missing")
             if todo:
+                prog.phase_to("failed", f"{len(todo)} rows would not render")
+                self._prog = None
                 self.log(f"FAIL {slug_for(section)}: {len(todo)} rows would not render "
                          f"after {self.attempts} attempts: {todo[:8]}")
                 return False
 
+        prog.phase_to("joining", f"joining {len(chunks)} takes")
         gap_para, gap_inner = self.gaps()
         entries: list[Path] = []
         for n in range(len(chunks)):
@@ -249,6 +348,8 @@ class Renderer:
         self.manifest_path(section).write_text(json.dumps(manifest, indent=1), encoding="utf-8")
         self.log(f"CHAPTER DONE {slug_for(section)}: {d/60:.1f} min audio, {len(chunks)} chunks, "
                  f"{time.time()-t0:.0f}s wall -> {joined}")
+        prog.finish(f"{d/60:.1f} min audio ({drift:+.1%})")
+        self._prog = None
 
         if not self.keep_takes:
             shutil.rmtree(cdir, ignore_errors=True)
@@ -256,10 +357,14 @@ class Renderer:
 
     def render_all(self, sections: list[dict]) -> bool:
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        if not self.progress:
+            # A quiet run must not leave a stale snapshot claiming "done" for a
+            # monitor that polls work/progress.json.
+            (self.work / "progress.json").unlink(missing_ok=True)
         self.log(f"=== render start: {len(sections)} sections, voice '{self.voice}', "
                  f"window {self.window}, {self.chunk_chars} chars/clip ===")
         ok = True
-        for sec in sections:
-            ok = self.render_section(sec) and ok
+        for n, sec in enumerate(sections, start=1):
+            ok = self.render_section(sec, position=(n, len(sections))) and ok
         self.log(f"=== render finished: {'all sections ok' if ok else 'WITH FAILURES'} ===")
         return ok

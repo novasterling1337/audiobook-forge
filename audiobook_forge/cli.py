@@ -7,9 +7,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
-from . import audio, config, extract as ex, verify as vf
+from . import audio, config, extract as ex, verify as vf, watch as wat
 from .chunk import plan
 from .config import ConfigError
 from .render import Renderer, VOCELLO, slug_for
@@ -182,9 +183,56 @@ def cmd_render(args) -> int:
     sections = _pick(book, args.section)
     r = Renderer(book, voice=args.voice, window=args.window, chunk_chars=args.chunks,
                   keep_takes=args.keep_takes, dry_run=args.dry_run,
+                  progress=getattr(args, "progress", True),
                   out_dir=Path(os.path.expanduser(args.out)).expanduser() if args.out else None)
     ok = r.render_all(sections)
     return 0 if ok else 1
+
+
+def cmd_watch(args) -> int:
+    book = config.load(args.book)
+    sections = _pick(book, args.section)
+    interval = max(0.5, float(args.interval))
+
+    if args.json:
+        rows = [wat.section_state(book, s) for s in sections]
+        print(json.dumps({"book": book.title, "slug": book.slug, "sections": rows}, indent=1))
+        return 0
+
+    if not args.follow:
+        print(f"{book.title}  ({book.slug})")
+        rows = [wat.section_state(book, s) for s in sections]
+        for state in rows:
+            print(wat.line_for(state))
+        done = sum(1 for r in rows if r["rendered"])
+        print(f"\n{done}/{len(rows)} rendered")
+        return 0
+
+    tty = sys.stdout.isatty()
+    try:
+        while True:
+            rows = [wat.section_state(book, s) for s in sections]
+            active = next((r for r in rows if r["phase"] in ("render", "joining")), None)
+            if active is None:
+                pending = [r for r in rows if not r["rendered"]]
+                if not pending:
+                    if tty:
+                        print()
+                    print("all sections rendered")
+                    return 0
+                active = pending[0]
+            line = wat.render_bar(active)
+            if tty:
+                cols = shutil.get_terminal_size(fallback=(80, 24)).columns
+                sys.stdout.write("\r" + line[:cols - 1].ljust(cols - 1))
+                sys.stdout.flush()
+            else:
+                print(line, flush=True)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        if tty:
+            print()
+        return 0
 
 
 def cmd_status(args) -> int:
@@ -353,10 +401,21 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out")
     r.add_argument("--keep-takes", action="store_true")
     r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--no-progress", dest="progress", action="store_false", default=True,
+                   help="no bar, no progress lines, no work/progress.json")
     r.set_defaults(func=cmd_render)
 
     st = book_arg(sub.add_parser("status", help="what is rendered, what is pending"))
     st.set_defaults(func=cmd_status)
+
+    w = book_arg(sub.add_parser("watch", help="follow a render started elsewhere"))
+    w.add_argument("--section", action="append", help="name or number; repeatable")
+    w.add_argument("-f", "--follow", action="store_true",
+                   help="redraw until the run finishes")
+    w.add_argument("--interval", type=float, default=2.0,
+                   help="seconds between refreshes (default 2)")
+    w.add_argument("--json", action="store_true", help="machine-readable snapshot")
+    w.set_defaults(func=cmd_watch)
 
     v = book_arg(sub.add_parser("verify", help="duration, levels, optional transcript check"))
     v.add_argument("--section", action="append")

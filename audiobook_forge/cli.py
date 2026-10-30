@@ -295,6 +295,16 @@ def cmd_verify(args) -> int:
 
 def cmd_bundle(args) -> int:
     book = config.load(args.book)
+    cover = args.cover or book.bundle.get("cover") or ""
+    if not cover:
+        for cand in ("cover.jpg", "cover.jpeg", "cover.png"):
+            if (book.path / cand).is_file():
+                cover = str(book.path / cand)
+                break
+    else:
+        cover = os.path.expanduser(cover)
+        if not Path(cover).is_absolute():
+            cover = str(book.path / cover)
     entries = []
     for s in book.body_sections():
         path = book.out_dir / f"{s['no']:02d} {slug_for(s)}.wav"
@@ -307,18 +317,21 @@ def cmd_bundle(args) -> int:
     out = Path(os.path.expanduser(args.out)) if args.out else \
         book.out_dir / f"{book.title} (unabridged).m4b"
     print(f"bundling {len(entries)} sections -> {out}")
+    if cover:
+        print(f"  cover: {cover}")
     if args.dry_run:
         meta = out.with_suffix(".ffmeta.txt")
         audio.encode_m4b(entries, out, book.title, book.author,
                          bitrate=args.bitrate or book.bundle.get("bitrate", "64k"),
-                         metadata_file=meta, dry_run=True)
+                         metadata_file=meta, cover=cover or None, dry_run=True)
         chapters = sum(1 for ln in meta.read_text().splitlines() if ln.startswith("[CHAPTER]"))
         meta.unlink(missing_ok=True)
         print(f"  dry run: {chapters} chapter markers, "
               f"{_human(sum(e[2] for e in entries))} total")
         return 0
     path = audio.encode_m4b(entries, out, book.title, book.author,
-                            bitrate=args.bitrate or book.bundle.get("bitrate", "64k"))
+                            bitrate=args.bitrate or book.bundle.get("bitrate", "64k"),
+                            cover=cover or None)
     mb = path.stat().st_size / 1e6
     size = f"{mb:.1f} MB" if mb >= 0.1 else f"{path.stat().st_size / 1e3:.0f} KB"
     print(f"  {path}  {size}")
@@ -427,6 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     b = book_arg(sub.add_parser("bundle", help="encode a chapterised .m4b from rendered sections"))
     b.add_argument("--out")
     b.add_argument("--bitrate")
+    b.add_argument("--cover", help="JPEG/PNG artwork (default: [bundle] cover, then cover.jpg in the book dir)")
     b.add_argument("--dry-run", action="store_true")
     b.set_defaults(func=cmd_bundle)
 

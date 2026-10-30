@@ -103,13 +103,15 @@ def encode_m4b(entries: list[tuple[str, str, float]], out: str | os.PathLike,
                title: str, author: str = "", bitrate: str = "64k",
                source_wav: str | os.PathLike | None = None,
                metadata_file: str | os.PathLike | None = None,
+               cover: str | os.PathLike | None = None,
                dry_run: bool = False) -> Path:
     """Encode one chapterised .m4b.
 
     `entries` is [(chapter_title, wav_path, duration_seconds)] in order.
     When `source_wav` is None the wavs are concatenated first; pass a joined
-    file to re-encode without touching the sources. `dry_run` writes only the
-    metadata file and skips encoding.
+    file to re-encode without touching the sources. `cover` embeds a JPEG/PNG
+    as the attached_pic artwork. `dry_run` writes only the metadata file and
+    skips encoding.
     """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -124,9 +126,16 @@ def encode_m4b(entries: list[tuple[str, str, float]], out: str | os.PathLike,
                list_file=out.with_suffix(".joined.txt"))
         source_wav = joined
 
-    r = run([FFMPEG, "-y", "-v", "error", "-i", str(source_wav),
-             "-i", str(meta), "-map_metadata", "1", "-map", "0:a",
-             "-c:a", "aac", "-b:a", bitrate, "-movflags", "+faststart",
+    inputs = [FFMPEG, "-y", "-v", "error", "-i", str(source_wav), "-i", str(meta)]
+    mapping = ["-map", "0:a", "-c:a", "aac", "-b:a", bitrate]
+    if cover:
+        cover_path = Path(os.path.expanduser(str(cover)))
+        if not cover_path.is_file():
+            raise RuntimeError(f"cover image not found: {cover_path}")
+        inputs += ["-i", str(cover_path)]
+        mapping += ["-map", "2:v", "-c:v", "mjpeg", "-disposition:v", "attached_pic"]
+    r = run(inputs + mapping +
+            ["-map_metadata", "1", "-movflags", "+faststart",
              "-f", "mp4", str(out)])
     if r.returncode != 0:
         raise RuntimeError(f"m4b encode failed: {r.stderr[-400:]}")

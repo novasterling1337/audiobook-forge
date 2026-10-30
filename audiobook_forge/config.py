@@ -58,6 +58,9 @@ DEFAULTS: dict = {
     "bundle": {
         "enabled": True,
         "bitrate": "64k",
+        # Artwork for the .m4b. Absolute, or relative to the book directory.
+        # When empty, cover.jpg / cover.jpeg / cover.png in the book dir is used.
+        "cover": "",
     },
 }
 

@@ -145,7 +145,14 @@ class Renderer:
         (cdir / "state.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
     def _adopt_orphans(self, cdir: Path, texts: list[str], fingerprint: str) -> dict[int, dict]:
-        """Recover takes from a crashed run that never wrote state.json."""
+        """Recover takes from a crashed run that never wrote state.json.
+
+        A take is adopted by index only when it carries the matching text hash
+        in its `.h` sidecar. Legacy takes without a sidecar are adopted as-is,
+        which is why the caller only calls this when there is no state.json at
+        all: after a text change the fingerprint no longer matches and every
+        take on disk is provably stale.
+        """
         orphans = sorted(p for p in cdir.glob("take_*.wav") if audio.has_audio(p))
         takes = {}
         for p in orphans:
@@ -153,8 +160,13 @@ class Renderer:
             if not m:
                 continue
             i = int(m.group(1))
-            if i < len(texts):
-                takes[i] = {"h": _hash(texts[i]), "p": str(p), "dur": round(audio.duration(p), 3)}
+            if i >= len(texts):
+                continue
+            sidecar = p.with_suffix(".h")
+            if sidecar.exists():
+                if sidecar.read_text(encoding="utf-8").strip() != _hash(texts[i]):
+                    continue
+            takes[i] = {"h": _hash(texts[i]), "p": str(p), "dur": round(audio.duration(p), 3)}
         if takes:
             self.log(f"  adopted {len(takes)} takes left by an interrupted run")
             self._save_state(cdir, fingerprint, takes)
@@ -255,7 +267,12 @@ class Renderer:
         cdir = self.take_dir(section)
         cdir.mkdir(parents=True, exist_ok=True)
         fingerprint = _hash("\x00".join(texts))
-        takes = self._load_state(cdir, fingerprint) or self._adopt_orphans(cdir, texts, fingerprint)
+        takes = self._load_state(cdir, fingerprint)
+        if not takes and not (cdir / "state.json").exists():
+            # Only after a lost state.json. A state.json whose fingerprint no
+            # longer matches means the section text changed, so the takes on
+            # disk are stale audio, not recoverable work.
+            takes = self._adopt_orphans(cdir, texts, fingerprint)
         missing = [i for i in range(len(texts)) if i not in takes]
 
         self.log(f"START {slug_for(section)}: {p['paragraphs']} paragraphs, {words} words, "
@@ -289,7 +306,11 @@ class Renderer:
                     gidx = todo[local_i]
                     dest = cdir / f"take_{gidx:05d}.wav"
                     os.replace(path, dest)
-                    takes[gidx] = {"h": _hash(texts[gidx]), "p": str(dest),
+                    h = _hash(texts[gidx])
+                    # sidecar so a later orphan adoption can prove the take
+                    # belongs to this text and not to an older revision
+                    dest.with_suffix(".h").write_text(h, encoding="utf-8")
+                    takes[gidx] = {"h": h, "p": str(dest),
                                    "dur": round(audio.duration(dest), 3)}
                 shutil.rmtree(wdir, ignore_errors=True)
                 todo = [i for i in todo if i not in takes]

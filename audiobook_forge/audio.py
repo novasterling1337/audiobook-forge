@@ -141,6 +141,7 @@ def encode_m4b(entries: list[tuple[str, str, float]], out: str | os.PathLike,
         raise RuntimeError(f"m4b encode failed: {r.stderr[-400:]}")
     if source_wav != out and Path(source_wav).name.endswith(".joined.wav"):
         Path(source_wav).unlink(missing_ok=True)
+        Path(source_wav).with_suffix(".txt").unlink(missing_ok=True)
     return out
 
 

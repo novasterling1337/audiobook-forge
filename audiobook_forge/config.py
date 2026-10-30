@@ -47,6 +47,13 @@ DEFAULTS: dict = {
         # chapters titled "2. Catastrophic Information". Never a global default:
         # a numbered line is a list item in one book and a heading in another.
         "heading_pattern": None,
+        # Ordered real titles, one per section, in reading order. Names a
+        # section the heading rules could only read as `Chapter I` and peels a
+        # title that the source glued onto the opening sentence.
+        "titles": [],
+        # TTS-only pronunciation rewrites, `{"Aeschylus": "ESS-kih-luss"}`.
+        # Applied to the text stored in sections.json, never to the source.
+        "respell": {},
     },
     "bundle": {
         "enabled": True,

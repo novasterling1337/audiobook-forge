@@ -196,6 +196,15 @@ name = "Jason Jorjani (icl exact)"
 start_at = "^Introduction$"     # drop title page, copyright, praise
 exclude = ["Works Cited", "Notes"]
 skip_lines = ["OceanofPDF"]
+
+# optional: real chapter titles in reading order, for sources whose headings
+# only say "Chapter I" and glue the title onto the opening sentence
+titles = ["Introduction", "The Spectral Revolution", "Fringe Science"]
+
+# optional: TTS-only phonetic rewrites, never written back to the source
+[extract.respell]
+"Aeschylus" = "ESS-kih-luss"
+"techne" = "TEKH-nay"
 ```
 
 Tuning that matters:
@@ -204,7 +213,9 @@ Tuning that matters:
   whether an existing file is plausible. Measure it once per voice: render one
   paragraph, divide words by minutes. 180 is a slow-ish narration pace.
 - `chunk_chars` — bigger means fewer clips and fewer joins, but must stay under
-  the engine's single-take limit.
+  the engine's single-take limit. A single over-long sentence is split at its
+  clause boundaries (`; : ,` or an em dash), then at word boundaries, so one
+  rambling sentence cannot push a window past the engine limit.
 - `window` — smaller survives flakier engines at some startup cost.
 - `paragraph_gap`, `inner_gap` — 0.45 s / 0.20 s sounds like prose; larger
   sounds like a lecture.
@@ -236,6 +247,18 @@ If a book's headings are not recognised, the failure is visible and safe:
 unrecognised headings stay in the body text and are read aloud, and
 `forge sections` shows a `Front Matter` section holding everything that came
 before the first real heading.
+
+Two config hooks cover the cases the heading rules cannot:
+
+- `titles` — an ordered list, one per section in reading order. It names a
+  section the rules could only read as `Chapter I`, and if the source glued the
+  real title onto the opening sentence (common in PDF reflow) it peels the title
+  into its own paragraph so the join inserts a gap and the chapter opens on it.
+- `[extract.respell]` — `{"Aeschylus": "ESS-kih-luss"}`. Phonetic rewrites for
+  the TTS only, applied to `sections.json`, never to the source. Keys are
+  regexes, anchored on word boundaries when they look like bare words, applied
+  longest first. Build the map from frequency: capitalised or non-ASCII tokens
+  absent from `/usr/share/dict/words` are the candidates.
 
 ## Verification
 

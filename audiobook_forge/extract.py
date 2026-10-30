@@ -318,9 +318,65 @@ def sectionise(blocks: list[str], cfg: dict | None = None,
     return sections
 
 
+def apply_titles(sections: list[dict], titles: list[str] | None) -> list[dict]:
+    """Name sections from an ordered list of real titles.
+
+    Positional, one title per section, in reading order. A heading the
+    extractor could only read as `Chapter I` gets its real name, and if the
+    section's first paragraph still begins with that title (a PDF reflow that
+    glued the title to the opening sentence) the title is peeled off into its
+    own paragraph so the joiner inserts a gap and the audio opens on it.
+    """
+    for sec, title in zip(sections, titles or []):
+        title = (title or "").strip()
+        if not title:
+            continue
+        sec["name"] = title
+        sec["title"] = ""
+        if not sec["paras"]:
+            continue
+        first = sec["paras"][0]
+        m = re.match(rf"{re.escape(title)}\s*[:.\u2014\u2013-]?\s*", first, re.IGNORECASE)
+        if not m:
+            continue
+        rest = first[m.end():].strip()
+        if not rest:
+            sec["paras"][0] = title
+            continue
+        rest = rest[0].upper() + rest[1:]
+        sec["paras"][:1] = [title, rest]
+    return sections
+
+
+def apply_respell(paras: list[str], respell: dict[str, str] | None) -> list[str]:
+    """Rewrite text for the TTS only: `{"Aeschylus": "ESS-kih-luss"}`.
+
+    Keys are regexes compiled case-insensitively and anchored on word
+    boundaries when the key looks like a bare word, so `techne` does not fire
+    inside `polytechnic`. Longest key first, so a short name cannot shadow a
+    longer phrase that contains it.
+    """
+    if not respell:
+        return paras
+    subs = []
+    for key, repl in sorted(respell.items(), key=lambda kv: -len(kv[0])):
+        pattern = re.escape(key)
+        if re.fullmatch(r"[\w\s'\-]+", key):
+            pattern = rf"\b{pattern}\b"
+        subs.append((re.compile(pattern, re.IGNORECASE), repl))
+    return [subs_fold(p, subs) for p in paras]
+
+
+def subs_fold(text: str, subs) -> str:
+    for rx, repl in subs:
+        text = rx.sub(repl, text)
+    return text
+
+
 def extract(src: Path, out: Path, *, start_at: str | None = None,
             end_at: str | None = None, skip_lines: list[str] | None = None,
-            heading_pattern: str | None = None, quiet: bool = False) -> list[dict]:
+            heading_pattern: str | None = None, titles: list[str] | None = None,
+            respell: dict[str, str] | None = None, quiet: bool = False) -> list[dict]:
     if not src.exists():
         raise ExtractError(f"source not found: {src}")
     skip_res = [re.compile(p, re.IGNORECASE) for p in (skip_lines or [])]
@@ -329,6 +385,9 @@ def extract(src: Path, out: Path, *, start_at: str | None = None,
                           heading_pattern=heading_pattern)
     if not sections:
         raise ExtractError("no sections detected; check start_at / heading rules")
+    sections = apply_titles(sections, titles)
+    for sec in sections:
+        sec["paras"] = apply_respell(sec["paras"], respell)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(sections, ensure_ascii=False, indent=1), encoding="utf-8")
     if not quiet:

@@ -161,7 +161,9 @@ def cmd_extract(args) -> int:
                else book.extract.get("heading_pattern"))
     print(f"extracting {src.name} -> {book.sections_file}")
     sections = ex.extract(src, book.sections_file, start_at=start, end_at=end,
-                          skip_lines=skip, heading_pattern=heading)
+                          skip_lines=skip, heading_pattern=heading,
+                          titles=list(book.extract.get("titles") or []),
+                          respell=dict(book.extract.get("respell") or {}))
     words = sum(len(p.split()) for s in sections for p in s["paras"])
     print(f"{len(sections)} sections, {words} words, "
           f"~{_human(words / float(book.render['wpm']) * 60)} of audio")
